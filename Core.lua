@@ -1,0 +1,445 @@
+-- ============================================================================
+--  SwapGear - MOTEUR
+--  Pas besoin de toucher à ce fichier pour ajouter des objets : voir Config.lua
+-- ============================================================================
+local ADDON, SG = ...   -- "..." = (nom de l'addon, table privée partagée entre les fichiers)
+
+-- API : le moteur moderne range tout dans C_Item / C_Container, on garde un
+-- fallback sur les anciennes fonctions globales au cas où.
+local EquipItemByName   = (C_Item and C_Item.EquipItemByName)   or _G.EquipItemByName
+local GetItemInfoInstant = (C_Item and C_Item.GetItemInfoInstant) or _G.GetItemInfoInstant
+local GetItemInfo       = (C_Item and C_Item.GetItemInfo)       or _G.GetItemInfo
+local GetItemIcon       = (C_Item and C_Item.GetItemIconByID)   or _G.GetItemIcon
+local GetItemNameByID   = (C_Item and C_Item.GetItemNameByID)
+local NUM_BAGS          = _G.NUM_TOTAL_EQUIPPED_BAG_SLOTS or _G.NUM_BAG_SLOTS or 4
+
+-- Type d'équipement -> slots possibles (armes volontairement exclues : main
+-- droite/gauche/2 mains ont des interactions qui compliqueraient tout).
+local SLOTS_BY_EQUIPLOC = {
+    INVTYPE_HEAD = { 1 },  INVTYPE_NECK = { 2 },    INVTYPE_SHOULDER = { 3 },
+    INVTYPE_CHEST = { 5 }, INVTYPE_ROBE = { 5 },    INVTYPE_WAIST = { 6 },
+    INVTYPE_LEGS = { 7 },  INVTYPE_FEET = { 8 },    INVTYPE_WRIST = { 9 },
+    INVTYPE_HAND = { 10 }, INVTYPE_FINGER = { 11, 12 },
+    INVTYPE_TRINKET = { 13, 14 }, INVTYPE_CLOAK = { 15 },
+}
+local SLOT_NAMES = {
+    [1] = "Tête", [2] = "Cou", [3] = "Épaules", [5] = "Torse", [6] = "Taille",
+    [7] = "Jambes", [8] = "Pieds", [9] = "Poignets", [10] = "Mains",
+    [11] = "Anneau 1", [12] = "Anneau 2", [13] = "Bijou 1", [14] = "Bijou 2", [15] = "Dos",
+}
+
+local function Print(...) print("|cff33ff99SwapGear|r:", ...) end
+
+-- ----------------------------------------------------------------------------
+--  Helpers publics (utilisables depuis Config.lua)
+-- ----------------------------------------------------------------------------
+
+-- Remonte la hiérarchie des cartes jusqu'au niveau "zone" (ignore sous-cartes,
+-- micro-donjons...). Renvoie uiMapID, nom.
+function SG.CurrentZone()
+    local id = C_Map.GetBestMapForUnit("player")
+    local info = id and C_Map.GetMapInfo(id)
+    while info and info.mapType and info.mapType > Enum.UIMapType.Zone
+          and info.parentMapID and info.parentMapID > 0 do
+        local parent = C_Map.GetMapInfo(info.parentMapID)
+        if not parent or parent.mapType < Enum.UIMapType.Zone then break end
+        id, info = info.parentMapID, parent
+    end
+    return id, info and info.name
+end
+
+-- list : mélange de uiMapID (nombres) et de noms de zone (chaînes)
+function SG.InZone(list)
+    if not list then return false end
+    local id, mapName = SG.CurrentZone()
+    local zone, real = GetZoneText(), GetRealZoneText()
+    for _, z in ipairs(list) do
+        if type(z) == "number" then
+            if z == id then return true end
+        elseif z == zone or z == real or z == mapName then
+            return true
+        end
+    end
+    return false
+end
+
+-- ----------------------------------------------------------------------------
+--  Inventaire (cache reconstruit seulement quand les sacs changent)
+-- ----------------------------------------------------------------------------
+local bagItems = {}   -- [itemID] = true
+
+local function ScanBags()
+    wipe(bagItems)
+    for bag = 0, NUM_BAGS do
+        for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            local id = C_Container.GetContainerItemID(bag, slot)
+            if id then bagItems[id] = true end
+        end
+    end
+end
+
+local function SlotsFor(itemID)
+    local _, _, _, equipLoc = GetItemInfoInstant(itemID)
+    return equipLoc and SLOTS_BY_EQUIPLOC[equipLoc]
+end
+
+local function EquippedSlot(itemID, slots)
+    for _, s in ipairs(slots) do
+        if GetInventoryItemID("player", s) == itemID then return s end
+    end
+end
+
+local function LevelOK(itemID)
+    local minLevel = select(5, GetItemInfo(itemID))   -- nil si pas encore en cache
+    return not minLevel or UnitLevel("player") >= minLevel
+end
+
+local function ItemName(itemID, rule)
+    return (GetItemNameByID and GetItemNameByID(itemID))
+        or (GetItemInfo(itemID)) or (rule and rule.name) or ("item:" .. itemID)
+end
+
+-- ----------------------------------------------------------------------------
+--  Évaluation des règles
+-- ----------------------------------------------------------------------------
+local function CheckCondition(c)
+    if type(c) == "function" then return c() and true or false end
+    local negate = c:sub(1, 1) == "!"
+    local name = negate and c:sub(2) or c
+    local fn = SG.Conditions and SG.Conditions[name]
+    if not fn then
+        if not SG._warned then SG._warned = {} end
+        if not SG._warned[name] then
+            SG._warned[name] = true
+            Print("condition inconnue '" .. name .. "' (voir Config.lua)")
+        end
+        return false
+    end
+    local ok = fn() and true or false
+    if negate then return not ok end
+    return ok
+end
+
+function SG.RuleActive(rule)
+    for _, c in ipairs(rule.when or {}) do
+        if not CheckCondition(c) then return false end
+    end
+    return true
+end
+
+-- Ordre de remplacement des slots d'un groupe (ex: {13,14} -> {14,13})
+local function SlotOrder(slots)
+    local order, used = {}, {}
+    for _, s in ipairs(SG.ReplaceFirst or {}) do
+        for _, gs in ipairs(slots) do
+            if gs == s and not used[s] then order[#order + 1] = s; used[s] = true end
+        end
+    end
+    for _, s in ipairs(slots) do
+        if not used[s] then order[#order + 1] = s end
+    end
+    return order
+end
+
+-- Calcule ce qu'il faut faire. Renvoie :
+--   equip   : liste { item=, slot=, rule= }  (objets situationnels à mettre)
+--   restore : liste { link=, item=, slot= }  (remettre l'équipement normal)
+function SG.ComputePlan()
+    local groups, wanted = {}, {}
+
+    -- 1) objets voulus, par groupe de slots, dans l'ordre de priorité
+    for _, rule in ipairs(SG.Rules or {}) do
+        local id = rule.item
+        local slots = id and SlotsFor(id)
+        if slots then
+            local key = table.concat(slots, ",")
+            local g = groups[key]
+            if not g then g = { slots = slots, items = {} }; groups[key] = g end
+            local owned = bagItems[id] or EquippedSlot(id, slots)
+            if #g.items < #slots and owned and LevelOK(id) and SG.RuleActive(rule) then
+                g.items[#g.items + 1] = { id = id, rule = rule }
+                wanted[id] = true
+            end
+        end
+    end
+
+    -- 2) affectation des slots
+    local equip = {}
+    for _, g in pairs(groups) do
+        local locked, missing = {}, {}
+        for _, it in ipairs(g.items) do
+            local s = EquippedSlot(it.id, g.slots)
+            if s then locked[s] = true else missing[#missing + 1] = it end
+        end
+        local order = SlotOrder(g.slots)
+        for _, it in ipairs(missing) do
+            for _, s in ipairs(order) do
+                if not locked[s] then
+                    locked[s] = true
+                    equip[#equip + 1] = { item = it.id, slot = s, rule = it.rule }
+                    break
+                end
+            end
+        end
+    end
+
+    -- 3) restauration : un slot qu'on a remplacé, dont l'objet actuel n'est
+    --    plus voulu -> on propose de remettre l'ancien.
+    local restore = {}
+    local saved = SwapGearCharDB.saved
+    for slot, link in pairs(saved) do
+        local savedID = GetItemInfoInstant(link)
+        local current = GetInventoryItemID("player", slot)
+        if current == savedID then
+            saved[slot] = nil                         -- déjà remis
+        elseif not wanted[current] and not SG.IsRuleItem(current) then
+            saved[slot] = nil                         -- changé à la main : on oublie
+        elseif not wanted[current] and (bagItems[savedID]) then
+            restore[#restore + 1] = { link = link, item = savedID, slot = slot }
+        end
+    end
+    -- un slot planifié pour un objet voulu n'a pas besoin d'être restauré
+    return equip, restore
+end
+
+function SG.IsRuleItem(id)
+    if not id then return false end
+    for _, r in ipairs(SG.Rules or {}) do
+        if r.item == id then return true end
+    end
+    return false
+end
+
+-- ----------------------------------------------------------------------------
+--  Actions
+-- ----------------------------------------------------------------------------
+local plan = { equip = {}, restore = {} }
+
+function SG.DoSwap()
+    if InCombatLockdown() then Print("impossible en combat.") return end
+    ClearCursor()
+    local saved = SwapGearCharDB.saved
+    if #plan.equip > 0 then
+        for _, a in ipairs(plan.equip) do
+            local currentLink = GetInventoryItemLink("player", a.slot)
+            local currentID = GetInventoryItemID("player", a.slot)
+            -- on mémorise l'objet "normal" une seule fois par slot
+            if currentLink and not saved[a.slot] and not SG.IsRuleItem(currentID) then
+                saved[a.slot] = currentLink
+            end
+            EquipItemByName(a.item, a.slot)
+        end
+    elseif #plan.restore > 0 then
+        for _, a in ipairs(plan.restore) do
+            EquipItemByName(a.link, a.slot)
+        end
+    end
+end
+
+-- ----------------------------------------------------------------------------
+--  Bouton
+-- ----------------------------------------------------------------------------
+local btn = CreateFrame("Button", "SwapGearButton", UIParent)
+btn:SetSize(44, 44)
+btn:SetFrameStrata("HIGH")
+btn:SetToplevel(true)
+btn:SetMovable(true)
+btn:SetClampedToScreen(true)
+btn:EnableMouse(true)
+btn:RegisterForDrag("LeftButton")
+btn:RegisterForClicks("LeftButtonUp")
+btn:Hide()
+
+btn.icon = btn:CreateTexture(nil, "ARTWORK")
+btn.icon:SetAllPoints()
+btn.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+btn.border = btn:CreateTexture(nil, "OVERLAY")
+btn.border:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+btn.border:SetBlendMode("ADD")
+btn.border:SetPoint("CENTER")
+btn.border:SetSize(80, 80)
+
+btn.count = btn:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+btn.count:SetPoint("BOTTOMRIGHT", -2, 2)
+
+btn.label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+btn.label:SetPoint("TOP", btn, "BOTTOM", 0, -2)
+
+btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+
+btn:SetScript("OnClick", function() SG.DoSwap() end)
+btn:SetScript("OnDragStart", function(self)
+    if IsShiftKeyDown() then self:StartMoving() end
+end)
+btn:SetScript("OnDragStop", function(self)
+    self:StopMovingOrSizing()
+    local p, _, rp, x, y = self:GetPoint()
+    SwapGearDB.pos = { p, rp, x, y }
+end)
+btn:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    if #plan.equip > 0 then
+        GameTooltip:AddLine("SwapGear : équiper")
+        for _, a in ipairs(plan.equip) do
+            GameTooltip:AddDoubleLine(ItemName(a.item, a.rule), SLOT_NAMES[a.slot], 0, 1, 0, 1, 1, 1)
+        end
+    else
+        GameTooltip:AddLine("SwapGear : remettre l'équipement")
+        for _, a in ipairs(plan.restore) do
+            GameTooltip:AddDoubleLine(a.link, SLOT_NAMES[a.slot], 1, 1, 1, 1, 1, 1)
+        end
+    end
+    GameTooltip:AddLine("Shift + glisser pour déplacer", 0.6, 0.6, 0.6)
+    GameTooltip:Show()
+end)
+btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+local function PlaceButton()
+    btn:ClearAllPoints()
+    local p = SwapGearDB.pos
+    if p then btn:SetPoint(p[1], UIParent, p[2], p[3], p[4])
+    else btn:SetPoint("CENTER", UIParent, "CENTER", 0, -150) end
+end
+
+-- ----------------------------------------------------------------------------
+--  Rafraîchissement
+-- ----------------------------------------------------------------------------
+function SG.Refresh()
+    if not SG.ready then return end
+    if InCombatLockdown() or UnitIsDeadOrGhost("player") then
+        btn:Hide(); return
+    end
+    plan.equip, plan.restore = SG.ComputePlan()
+
+    local list, isEquip = plan.equip, true
+    if #list == 0 then list, isEquip = plan.restore, false end
+    if #list == 0 then btn:Hide(); return end
+
+    btn.icon:SetTexture(GetItemIcon(list[1].item))
+    btn.count:SetText(#list > 1 and #list or "")
+    btn.label:SetText(isEquip and "Équiper" or "Remettre")
+    if isEquip then btn.border:SetVertexColor(0.2, 1, 0.2) else btn.border:SetVertexColor(1, 0.8, 0.2) end
+    btn:Show()
+    if GameTooltip:IsOwned(btn) then btn:GetScript("OnEnter")(btn) end
+end
+
+-- Exécute Refresh en capturant les erreurs (le client les masque par défaut).
+-- Chaque erreur distincte n'est affichée qu'une fois dans le chat.
+local shownErrors = {}
+local function SafeRefresh()
+    local ok, err = xpcall(SG.Refresh, function(e) return tostring(e) .. "\n" .. debugstack(2, 3, 0) end)
+    if not ok then
+        btn:Hide()
+        SG.lastError = err
+        local key = tostring(err):match("^[^\n]*")
+        if not shownErrors[key] then
+            shownErrors[key] = true
+            Print("|cffff4444ERREUR|r " .. tostring(err))
+        end
+    end
+end
+
+-- Regroupe les rafales d'événements en un seul refresh
+local pending = false
+local function QueueRefresh()
+    if pending then return end
+    pending = true
+    C_Timer.After(0.1, function() pending = false; SafeRefresh() end)
+end
+
+local ev = CreateFrame("Frame")
+ev:RegisterEvent("PLAYER_LOGIN")
+ev:SetScript("OnEvent", function(self, event, ...)
+    if event == "PLAYER_LOGIN" then
+        SwapGearDB = SwapGearDB or {}
+        SwapGearCharDB = SwapGearCharDB or {}
+        SwapGearCharDB.saved = SwapGearCharDB.saved or {}
+        PlaceButton()
+        ScanBags()
+        SG.ready = true
+        for _, e in ipairs({
+            "PLAYER_ENTERING_WORLD", "PLAYER_MOUNT_DISPLAY_CHANGED",
+            "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_AREA",
+            "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED",
+            "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
+            "PLAYER_LEVEL_UP", "PLAYER_UNGHOST", "PLAYER_ALIVE",
+        }) do pcall(self.RegisterEvent, self, e) end
+        -- filet de sécurité pour les conditions perso sans événement dédié
+        C_Timer.NewTicker(1, QueueRefresh)
+    elseif event == "BAG_UPDATE_DELAYED" then
+        ScanBags()
+    end
+    QueueRefresh()
+end)
+
+-- ----------------------------------------------------------------------------
+--  Commandes : /sg
+-- ----------------------------------------------------------------------------
+SLASH_SWAPGEAR1, SLASH_SWAPGEAR2 = "/sg", "/swapgear"
+SlashCmdList.SWAPGEAR = function(msg)
+    msg = (msg or ""):lower():match("^%s*(.-)%s*$")
+    if msg == "zone" then
+        local id, name = SG.CurrentZone()
+        Print(("zone: %s (uiMapID %s) | sous-zone: %s"):format(
+            tostring(name), tostring(id), GetSubZoneText() or ""))
+    elseif msg == "speed" then
+        Print(("vitesse: %.1f%%"):format(GetUnitSpeed("player") / 7 * 100))
+    elseif msg == "status" or msg == "debug" then
+        local function yn(v) return v and "|cff00ff00oui|r" or "|cffff4444non|r" end
+        local n = 0; for _ in pairs(bagItems) do n = n + 1 end
+        local id, zname = SG.CurrentZone()
+        Print(("chargé:%s | règles:%d | objets distincts en sac:%d | combat:%s | monté:%s | zone:%s (%s)"):format(
+            yn(SG.ready), #(SG.Rules or {}), n, yn(InCombatLockdown()), yn(IsMounted()),
+            tostring(zname), tostring(id)))
+        for i, r in ipairs(SG.Rules or {}) do
+            local _, _, _, loc = GetItemInfoInstant(r.item)
+            local slots = SlotsFor(r.item)
+            local conds = {}
+            for _, c in ipairs(r.when or {}) do
+                local okc, res = pcall(CheckCondition, c)
+                conds[#conds + 1] = (type(c) == "string" and c or "fn") .. "=" ..
+                    (okc and (res and "V" or "F") or ("ERR:" .. tostring(res)))
+            end
+            Print(("%d. %s | type:%s | en sac:%s | équipé:%s | niveau ok:%s | %s"):format(
+                i, ItemName(r.item, r), tostring(loc), yn(bagItems[r.item]),
+                yn(slots and EquippedSlot(r.item, slots)), yn(LevelOK(r.item)), table.concat(conds, " ")))
+        end
+        local ok, e, rs = pcall(SG.ComputePlan)
+        if ok then
+            Print(("plan: %d à équiper, %d à remettre | bouton visible:%s"):format(#e, #rs, yn(btn:IsShown())))
+        else
+            Print("|cffff4444ERREUR plan|r " .. tostring(e))
+        end
+        if SG.lastError then Print("dernière erreur: " .. SG.lastError) end
+    elseif msg == "show" then
+        btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+        btn.label:SetText("test")
+        btn:Show()
+        Print("bouton forcé visible (Shift+glisser pour le bouger, /sg reset pour recentrer)")
+    elseif msg == "swap" then
+        SG.DoSwap()
+    elseif msg == "reset" then
+        SwapGearDB.pos = nil; PlaceButton(); ScanBags(); QueueRefresh(); Print("position réinitialisée.")
+    elseif msg == "clear" then
+        wipe(SwapGearCharDB.saved); QueueRefresh(); Print("équipement mémorisé oublié.")
+    elseif msg == "help" or msg == "" then
+        local C = "|cffffd100"
+        Print("commandes disponibles :")
+        print(C .. "/sg help|r - cette aide")
+        print(C .. "/sg status|r - état de chaque règle (en sac, conditions V/F, plan, erreurs)")
+        print(C .. "/sg swap|r - même effet qu'un clic sur le bouton (pour macro/keybind)")
+        print(C .. "/sg show|r - force l'affichage du bouton (pour le retrouver)")
+        print(C .. "/sg reset|r - recentre le bouton et rescanne les sacs")
+        print(C .. "/sg clear|r - oublie l'équipement normal mémorisé")
+        print(C .. "/sg zone|r - nom et uiMapID de la zone (pour SG.Zones)")
+        print(C .. "/sg speed|r - vitesse actuelle en %")
+        print("Bouton : clic = équiper/remettre, Shift+glisser = déplacer. Macro : /click SwapGearButton")
+        local names = {}
+        for k in pairs(SG.Conditions or {}) do names[#names + 1] = k end
+        table.sort(names)
+        print("Conditions (Config.lua, préfixe ! pour inverser) : " .. C .. table.concat(names, ", ") .. "|r")
+    else
+        Print("commande inconnue '" .. msg .. "', tape /sg help")
+    end
+end

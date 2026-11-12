@@ -1,0 +1,33 @@
+# Publie automatiquement une Release GitHub (lue par WowUp) à chaque tag vX.Y.Z
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construire le zip
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p build/SwapGear
+          # tout le depot sauf .git, .github, build
+          rsync -a --exclude='.git*' --exclude='build' ./ build/SwapGear/
+          # la version du .toc suit le tag
+          sed -i "s/^## Version:.*/## Version: ${VERSION}/" build/SwapGear/SwapGear.toc
+          cd build && zip -r "SwapGear-${VERSION}-forever.zip" SwapGear
+
+      - name: Publier la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "build/SwapGear-${GITHUB_REF_NAME#v}-forever.zip" \
+            --title "$GITHUB_REF_NAME" --generate-notes

@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: SwapGear
+## Notes: Fait apparaître un bouton pour équiper des objets situationnels (monture, désert...).
+## Author: toi
+## Version: 1.0.0
+## IconTexture: Interface\Icons\INV_Misc_Food_54
+## SavedVariables: SwapGearDB
+## SavedVariablesPerCharacter: SwapGearCharDB
+
+Core.lua
+Config.lua
