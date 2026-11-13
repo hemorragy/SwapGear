@@ -26,6 +26,10 @@ SG.Rules = {
     -- +3% vitesse de monture partout
     { item = 11122,  name = "Carrot on a Stick", when = { "mounted" } },
 
+    -- damage forest
+    { item = 270275, name = "Cleansed Vilebranch Medallion", when = { "forest" } },
+    { item = 270276, name = "Cleansed Vilebranch Icon",      when = { "forest" } },
+
     -- Exemples (decommente / adapte) :
     -- { item = 7969, name = "Bottes avec eperons", when = { "mounted" } },
     -- { item = 12345, name = "Gants Joug-d'hiver", when = { "mounted", function()
@@ -49,11 +53,21 @@ SG.ReplaceFirst = { 14, 12 }
 -- ----------------------------------------------------------------------------
 SG.Zones = {
     desert = {
-        71, "Tanaris",
-        81, "Silithus",
-        64, "Mille pointes", "Thousand Needles",
-        66, "Desolace", "Desolace",
-        15, "Terres ingrates", "Badlands",
+        1446,  -- Tanaris
+        1451,  -- Silithus
+        1441,  -- Mille pointes
+        1443,  -- Desolace
+        1418,  -- Terres ingrates
+    },
+    forest = {
+        1429,  -- Foret d'Elwynn
+        1440,  -- Orneval
+        1444,  -- Feralas
+        1438,  -- Teldrassil
+        1439,  -- Sombrivage
+        1412,  -- Mulgore
+        1413,  -- Les Tarides
+        1417,  -- Hautes-terres d'Arathi
     },
 }
 

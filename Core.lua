@@ -163,6 +163,8 @@ function SG.ComputePlan()
         end
     end
 
+    local saved, ours = SwapGearCharDB.saved, SwapGearCharDB.ours
+
     -- 2) affectation des slots
     local equip = {}
     for _, g in pairs(groups) do
@@ -173,32 +175,50 @@ function SG.ComputePlan()
         end
         local order = SlotOrder(g.slots)
         for _, it in ipairs(missing) do
+            -- si cet objet est le stuff "normal" d'un slot qu'on a remplacé,
+            -- on le remet à SA place plutôt que n'importe où
+            local target
             for _, s in ipairs(order) do
-                if not locked[s] then
-                    locked[s] = true
-                    equip[#equip + 1] = { item = it.id, slot = s, rule = it.rule }
-                    break
+                if not locked[s] and saved[s] and GetItemInfoInstant(saved[s]) == it.id then
+                    target = s; break
                 end
+            end
+            if not target then
+                for _, s in ipairs(order) do
+                    if not locked[s] then target = s; break end
+                end
+            end
+            if target then
+                locked[target] = true
+                equip[#equip + 1] = { item = it.id, slot = target, rule = it.rule }
             end
         end
     end
 
-    -- 3) restauration : un slot qu'on a remplacé, dont l'objet actuel n'est
-    --    plus voulu -> on propose de remettre l'ancien.
+    -- 3) restauration : un slot qu'on a remplacé, dont l'objet (posé par nous)
+    --    n'est plus voulu -> on propose de remettre l'ancien.
     local restore = {}
-    local saved = SwapGearCharDB.saved
     for slot, link in pairs(saved) do
         local savedID = GetItemInfoInstant(link)
         local current = GetInventoryItemID("player", slot)
-        if current == savedID then
-            saved[slot] = nil                         -- déjà remis
-        elseif not wanted[current] and not SG.IsRuleItem(current) then
-            saved[slot] = nil                         -- changé à la main : on oublie
-        elseif not wanted[current] and (bagItems[savedID]) then
+        if current == nil then
+            -- inventaire pas encore chargé (écran de chargement, portail...)
+            -- ou slot vidé : on ne touche à rien
+        elseif current == savedID then
+            saved[slot], ours[slot] = nil, nil       -- déjà remis
+        elseif ours[slot] and current ~= ours[slot] and not wanted[current] then
+            saved[slot], ours[slot] = nil, nil       -- changé à la main : on oublie
+        elseif not wanted[current] and bagItems[savedID] then
             restore[#restore + 1] = { link = link, item = savedID, slot = slot }
         end
     end
-    -- un slot planifié pour un objet voulu n'a pas besoin d'être restauré
+    -- un slot déjà pris par un équipement prévu n'est pas à restaurer, et un
+    -- objet normal qu'on va de toute façon rééquiper non plus
+    local busy, equipping = {}, {}
+    for _, a in ipairs(equip) do busy[a.slot] = true; equipping[a.item] = true end
+    for i = #restore, 1, -1 do
+        if busy[restore[i].slot] or equipping[restore[i].item] then table.remove(restore, i) end
+    end
     return equip, restore
 end
 
@@ -218,21 +238,25 @@ local plan = { equip = {}, restore = {} }
 function SG.DoSwap()
     if InCombatLockdown() then Print("impossible en combat.") return end
     ClearCursor()
-    local saved = SwapGearCharDB.saved
+    local saved, ours = SwapGearCharDB.saved, SwapGearCharDB.ours
     if #plan.equip > 0 then
         for _, a in ipairs(plan.equip) do
             local currentLink = GetInventoryItemLink("player", a.slot)
-            local currentID = GetInventoryItemID("player", a.slot)
-            -- on mémorise l'objet "normal" une seule fois par slot
-            if currentLink and not saved[a.slot] and not SG.IsRuleItem(currentID) then
+            -- on mémorise l'objet "normal" une seule fois par slot, même si
+            -- c'est un objet d'une règle (ex : Vilebranch porté en permanence)
+            if currentLink and not saved[a.slot] then
                 saved[a.slot] = currentLink
+            end
+            if saved[a.slot] and GetItemInfoInstant(saved[a.slot]) == a.item then
+                saved[a.slot], ours[a.slot] = nil, nil   -- on remet l'objet normal
+            elseif saved[a.slot] then
+                ours[a.slot] = a.item                    -- objet posé par l'addon
             end
             EquipItemByName(a.item, a.slot)
         end
-    elseif #plan.restore > 0 then
-        for _, a in ipairs(plan.restore) do
-            EquipItemByName(a.link, a.slot)
-        end
+    end
+    for _, a in ipairs(plan.restore) do
+        EquipItemByName(a.link, a.slot)
     end
 end
 
@@ -284,7 +308,8 @@ btn:SetScript("OnEnter", function(self)
         for _, a in ipairs(plan.equip) do
             GameTooltip:AddDoubleLine(ItemName(a.item, a.rule), SLOT_NAMES[a.slot], 0, 1, 0, 1, 1, 1)
         end
-    else
+    end
+    if #plan.restore > 0 then
         GameTooltip:AddLine("SwapGear : remettre l'équipement")
         for _, a in ipairs(plan.restore) do
             GameTooltip:AddDoubleLine(a.link, SLOT_NAMES[a.slot], 1, 1, 1, 1, 1, 1)
@@ -312,12 +337,13 @@ function SG.Refresh()
     end
     plan.equip, plan.restore = SG.ComputePlan()
 
-    local list, isEquip = plan.equip, true
-    if #list == 0 then list, isEquip = plan.restore, false end
-    if #list == 0 then btn:Hide(); return end
+    local isEquip = #plan.equip > 0
+    local first = plan.equip[1] or plan.restore[1]
+    local total = #plan.equip + #plan.restore
+    if total == 0 then btn:Hide(); return end
 
-    btn.icon:SetTexture(GetItemIcon(list[1].item))
-    btn.count:SetText(#list > 1 and #list or "")
+    btn.icon:SetTexture(GetItemIcon(first.item))
+    btn.count:SetText(total > 1 and total or "")
     btn.label:SetText(isEquip and "Équiper" or "Remettre")
     if isEquip then btn.border:SetVertexColor(0.2, 1, 0.2) else btn.border:SetVertexColor(1, 0.8, 0.2) end
     btn:Show()
@@ -355,6 +381,7 @@ ev:SetScript("OnEvent", function(self, event, ...)
         SwapGearDB = SwapGearDB or {}
         SwapGearCharDB = SwapGearCharDB or {}
         SwapGearCharDB.saved = SwapGearCharDB.saved or {}
+        SwapGearCharDB.ours = SwapGearCharDB.ours or {}
         PlaceButton()
         ScanBags()
         SG.ready = true
@@ -367,7 +394,8 @@ ev:SetScript("OnEvent", function(self, event, ...)
         }) do pcall(self.RegisterEvent, self, e) end
         -- filet de sécurité pour les conditions perso sans événement dédié
         C_Timer.NewTicker(1, QueueRefresh)
-    elseif event == "BAG_UPDATE_DELAYED" then
+    elseif event == "BAG_UPDATE_DELAYED" or event == "PLAYER_ENTERING_WORLD" then
+        -- après un écran de chargement, sacs et équipement arrivent un peu après
         ScanBags()
     end
     QueueRefresh()
@@ -422,7 +450,7 @@ SlashCmdList.SWAPGEAR = function(msg)
     elseif msg == "reset" then
         SwapGearDB.pos = nil; PlaceButton(); ScanBags(); QueueRefresh(); Print("position réinitialisée.")
     elseif msg == "clear" then
-        wipe(SwapGearCharDB.saved); QueueRefresh(); Print("équipement mémorisé oublié.")
+        wipe(SwapGearCharDB.saved); wipe(SwapGearCharDB.ours); QueueRefresh(); Print("équipement mémorisé oublié.")
     elseif msg == "help" or msg == "" then
         local C = "|cffffd100"
         Print("commandes disponibles :")
