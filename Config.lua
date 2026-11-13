@@ -1,12 +1,7 @@
--- ============================================================================
---  SwapGear - CONFIGURATION
---  C'est le seul fichier que tu as besoin de modifier au quotidien.
---  Apres modification : /reload en jeu.
--- ============================================================================
 local _, SG = ...
 
 -- ----------------------------------------------------------------------------
---  ReGLES
+--  REGLES
 --  L'ORDRE = LA PRIORITE. La premiere regle de la liste gagne.
 --  Exemple : 2 slots de bijou, 3 bijoux "actifs" -> on equipe les 2 premiers.
 --
@@ -20,10 +15,10 @@ local _, SG = ...
 --  Le slot (bijou, gants, bottes...) est deduit automatiquement de l'objet.
 -- ----------------------------------------------------------------------------
 SG.Rules = {
-    -- +7% vitesse de monture en zone desertique (Zul'Farrak)
+    -- Mount speed
+    -- +7% desert
     { item = 274648, name = "The Desert Rose",   when = { "mounted", "desert" } },
-
-    -- +3% vitesse de monture partout
+    -- +3%
     { item = 11122,  name = "Carrot on a Stick", when = { "mounted" } },
 
     -- damage forest
@@ -51,33 +46,231 @@ SG.ReplaceFirst = { 14, 12 }
 --  Le tooltip dit juste "Desert areas" : la liste exacte est a confirmer en
 --  jeu. Astuce : equipe la Rose, monte, et compare /sg speed dans la zone.
 -- ----------------------------------------------------------------------------
+local function I(id) return { instance = id } end
+ 
 SG.Zones = {
     desert = {
-        1446,  -- Tanaris
+        1418,  -- Terres ingrates / Badlands
+        1419,  -- Terres foudroyées / Blasted Lands
+        1443,  -- Désolace
+        1411,  -- Durotar
         1451,  -- Silithus
-        1441,  -- Mille pointes
-        1443,  -- Desolace
-        1418,  -- Terres ingrates
+        1446,  -- Tanaris
+        1413,  -- Les Tarides / The Barrens
+        1441,  -- Mille pointes / Thousand Needles
+        1454,  -- Orgrimmar
+        I(509),  -- Ruines d'Ahn'Qiraj (AQ20)
+        I(531),  -- Temple d'Ahn'Qiraj (AQ40)
+        I(70),   -- Uldaman
+        I(209),  -- Zul'Farrak
+        "Portes d'Ahn'Qiraj", "Gates of Ahn'Qiraj",
     },
     forest = {
-        1429,  -- Foret d'Elwynn
-        1440,  -- Orneval
-        1444,  -- Feralas
-        1438,  -- Teldrassil
-        1439,  -- Sombrivage
-        1412,  -- Mulgore
-        1413,  -- Les Tarides
         1417,  -- Hautes-terres d'Arathi
+        1440,  -- Orneval / Ashenvale
+        1447,  -- Azshara
+        1439,  -- Sombrivage / Darkshore
+        1426,  -- Dun Morogh
+        1431,  -- Bois de la Pénombre / Duskwood
+        1445,  -- Marécage d'Âprefange / Dustwallow Marsh
+        1423,  -- Maleterres de l'Est / Eastern Plaguelands
+        1429,  -- Forêt d'Elwynn
+        1448,  -- Gangrebois / Felwood
+        1444,  -- Féralas
+        1424,  -- Contreforts de Hautebrande / Hillsbrad
+        1432,  -- Loch Modan
+        1450,  -- Reflet-de-Lune / Moonglade
+        1412,  -- Mulgore
+        1433,  -- Les Carmines / Redridge
+        1421,  -- Forêt des Pins-Argentés / Silverpine
+        1442,  -- Les Serres-Rocheuses / Stonetalon
+        1434,  -- Vallée de Strangleronce / Stranglethorn
+        1435,  -- Marais des Chagrins / Swamp of Sorrows
+        1438,  -- Teldrassil
+        1425,  -- Les Hinterlands
+        1420,  -- Clairières de Tirisfal
+        1449,  -- Cratère d'Un'Goro
+        1422,  -- Maleterres de l'Ouest / Western Plaguelands
+        1436,  -- Marche de l'Ouest / Westfall
+        1437,  -- Les Paluns / Wetlands
+        1452,  -- Berceau-de-l'Hiver / Winterspring
+        1457,  -- Darnassus
+        1453,  -- Hurlevent / Stormwind
+        I(30),   -- Vallée d'Alterac
+        I(529),  -- Bassin Arathi
+        I(489),  -- Goulet des Chanteguerres / Warsong Gulch
+        I(429),  -- Hache-Tripes / Dire Maul
+        I(33),   -- Donjon d'Ombrecroc / Shadowfang Keep
+        I(309),  -- Zul'Gurub
+        "Baie-du-Butin", "Booty Bay",
+        "Thalanaar",
+        -- zones propres à Forever (nom FR à vérifier avec /sg zone) :
+        "Darkspear Islands", "Mount Hyjal", "Riverglades", "Shen'dralas",
+        "Zephras Isle", "Blackmaw Hold", "Excavation Site: Wetlands", "Gilneas",
+        "Krol'dok Stronghold", "Ruins of Gilneas", "The Shaper's Terrace", "Valanaar",
+    },
+    swamp = {
+        1439,  -- Sombrivage / Darkshore
+        1445,  -- Marécage d'Âprefange / Dustwallow Marsh
+        1444,  -- Féralas
+        1435,  -- Marais des Chagrins / Swamp of Sorrows
+        1449,  -- Cratère d'Un'Goro
+        1437,  -- Les Paluns / Wetlands
+        I(349),  -- Maraudon
+        I(109),  -- Temple d'Atal'Hakkar
+        I(43),   -- Cavernes des Lamentations / Wailing Caverns
+        "Riverglades", "Excavation Site: Wetlands", "The Drowned City", "The Shaper's Terrace",
+    },
+    wasteland = {
+        1418,  -- Terres ingrates / Badlands
+        1419,  -- Terres foudroyées / Blasted Lands
+        1428,  -- Steppes ardentes / Burning Steppes
+        1430,  -- Défilé de Deuillevent / Deadwind Pass
+        1443,  -- Désolace
+        1411,  -- Durotar
+        1423,  -- Maleterres de l'Est
+        1448,  -- Gangrebois / Felwood
+        1427,  -- Gorge des Vents brûlants / Searing Gorge
+        1451,  -- Silithus
+        1421,  -- Forêt des Pins-Argentés / Silverpine
+        1446,  -- Tanaris
+        1413,  -- Les Tarides / The Barrens
+        1420,  -- Clairières de Tirisfal
+        1422,  -- Maleterres de l'Ouest
+        1436,  -- Marche de l'Ouest / Westfall
+        1454,  -- Orgrimmar
+        1458,  -- Fossoyeuse / Undercity
+        I(129),  -- Souilles de Tranchebauge / Razorfen Downs
+        I(47),   -- Kraal de Tranchebauge / Razorfen Kraul
+        I(329),  -- Stratholme
+        I(209),  -- Zul'Farrak
+        "Ruines de Lordaeron", "Ruins of Lordaeron",
+        "Shen'dralas",
+    },
+    haunted = {
+        1430,  -- Défilé de Deuillevent / Deadwind Pass
+        1431,  -- Bois de la Pénombre / Duskwood
+        1423,  -- Maleterres de l'Est
+        1448,  -- Gangrebois / Felwood
+        1421,  -- Forêt des Pins-Argentés / Silverpine
+        1435,  -- Marais des Chagrins / Swamp of Sorrows
+        1420,  -- Clairières de Tirisfal
+        1422,  -- Maleterres de l'Ouest
+        1458,  -- Fossoyeuse / Undercity
+        I(429),  -- Hache-Tripes / Dire Maul
+        I(349),  -- Maraudon
+        I(533),  -- Naxxramas
+        I(129),  -- Souilles de Tranchebauge / Razorfen Downs
+        I(189),  -- Monastère écarlate
+        I(289),  -- Scholomance
+        I(33),   -- Donjon d'Ombrecroc / Shadowfang Keep
+        I(329),  -- Stratholme
+        I(109),  -- Temple d'Atal'Hakkar
+        I(209),  -- Zul'Farrak
+        I(309),  -- Zul'Gurub
+        "Ruines de Lordaeron", "Ruins of Lordaeron",
+        "Shen'dralas", "Gilneas", "Ruins of Gilneas", "The Drowned City", "The Hall of Thanes",
+    },
+    mountain = {
+        1416,  -- Montagnes d'Alterac
+        1417,  -- Hautes-terres d'Arathi
+        1447,  -- Azshara
+        1418,  -- Terres ingrates / Badlands
+        1428,  -- Steppes ardentes / Burning Steppes
+        1430,  -- Défilé de Deuillevent / Deadwind Pass
+        1426,  -- Dun Morogh
+        1424,  -- Contreforts de Hautebrande / Hillsbrad
+        1432,  -- Loch Modan
+        1412,  -- Mulgore
+        1433,  -- Les Carmines / Redridge
+        1427,  -- Gorge des Vents brûlants / Searing Gorge
+        1442,  -- Les Serres-Rocheuses / Stonetalon
+        1434,  -- Vallée de Strangleronce / Stranglethorn
+        1413,  -- Les Tarides / The Barrens
+        1425,  -- Les Hinterlands
+        1441,  -- Mille pointes / Thousand Needles
+        1452,  -- Berceau-de-l'Hiver / Winterspring
+        1456,  -- Les Pitons-du-Tonnerre / Thunder Bluff
+        I(30),   -- Vallée d'Alterac
+        I(529),  -- Bassin Arathi
+        "Mont Rochenoire", "Blackrock Mountain",
+        "Mount Hyjal", "Zephras Isle", "Blackmaw Hold", "Krol'dok Stronghold",
+    },
+    snowy = {
+        1416,  -- Montagnes d'Alterac
+        1426,  -- Dun Morogh
+        1452,  -- Berceau-de-l'Hiver / Winterspring
+        I(30),   -- Vallée d'Alterac
+    },
+    city = {
+        1457,  -- Darnassus
+        1455,  -- Forgefer / Ironforge
+        1454,  -- Orgrimmar
+        1453,  -- Hurlevent / Stormwind
+        1456,  -- Les Pitons-du-Tonnerre / Thunder Bluff
+        1458,  -- Fossoyeuse / Undercity
+        I(509), I(531),  -- Ahn'Qiraj (AQ20, AQ40)
+        I(48),   -- Profondeurs de Brassenoire / Blackfathom Deeps
+        I(230),  -- Profondeurs de Rochenoire / Blackrock Depths
+        I(229),  -- Pic Rochenoire / Blackrock Spire
+        I(469),  -- Repaire de l'Aile noire / Blackwing Lair
+        I(429),  -- Hache-Tripes / Dire Maul
+        I(90),   -- Gnomeregan
+        I(533),  -- Naxxramas
+        I(129),  -- Souilles de Tranchebauge
+        I(47),   -- Kraal de Tranchebauge
+        I(189),  -- Monastère écarlate
+        I(289),  -- Scholomance
+        I(33),   -- Donjon d'Ombrecroc
+        I(329),  -- Stratholme
+        I(36),   -- Les Mortemines / The Deadmines
+        I(34),   -- La Prison / The Stockade
+        I(109),  -- Temple d'Atal'Hakkar
+        I(70),   -- Uldaman
+        I(489),  -- Goulet des Chanteguerres
+        I(209),  -- Zul'Farrak
+        I(309),  -- Zul'Gurub
+        "Baie-du-Butin", "Booty Bay",
+        "Gadgetzan",
+        "Long-guet", "Everlook",
+        "Mont Rochenoire", "Blackrock Mountain",
+        "Portes d'Ahn'Qiraj", "Gates of Ahn'Qiraj",
+        "Ruines de Lordaeron", "Ruins of Lordaeron",
+        "Alcaz Prison", "Blackmaw Hold", "City of Dalaran", "Gilneas", "Krol'dok Stronghold",
+        "Ruins of Gilneas", "The Drowned City", "The Hall of Thanes", "Valanaar",
+    },
+    underground = {
+        1455,  -- Forgefer / Ironforge
+        1458,  -- Fossoyeuse / Undercity
+        I(230),  -- Profondeurs de Rochenoire
+        I(229),  -- Pic Rochenoire
+        I(469),  -- Repaire de l'Aile noire
+        I(90),   -- Gnomeregan
+        I(349),  -- Maraudon
+        I(409),  -- Cœur du Magma / Molten Core
+        I(249),  -- Repaire d'Onyxia
+        I(389),  -- Gouffre de Ragefeu / Ragefire Chasm
+        I(36),   -- Les Mortemines
+        I(34),   -- La Prison
+        I(70),   -- Uldaman
+        I(43),   -- Cavernes des Lamentations
+        "Alcaz Prison", "Blackmaw Hold", "The Hall of Thanes",
+    },
+    -- Pas encore de liste officielle selon la source. Candidats probables,
+    -- à vérifier avec l'infobulle de l'objet sur place :
+    volcanic = {
+        1428,   -- Steppes ardentes / Burning Steppes
+        1427,   -- Gorge des Vents brûlants / Searing Gorge
+        I(409), -- Cœur du Magma / Molten Core
     },
 }
 
 -- ----------------------------------------------------------------------------
---  CONDITIONS ReUTILISABLES
+--  CONDITIONS REUTILISABLES
 --  Une condition = une fonction sans argument qui renvoie true/false.
 -- ----------------------------------------------------------------------------
 SG.Conditions = {
     mounted  = function() return IsMounted() end,
-    desert   = function() return SG.InZone(SG.Zones.desert) end,
     swimming = function() return IsSwimming() end,
     indoors  = function() return IsIndoors() end,
     resting  = function() return IsResting() end,          -- en ville / auberge

@@ -49,14 +49,32 @@ function SG.CurrentZone()
 end
 
 -- list : mélange de uiMapID (nombres) et de noms de zone (chaînes)
+-- Instance courante : renvoie instanceID (identique quelle que soit la langue)
+-- ou nil si on est dans le monde extérieur.
+function SG.CurrentInstance()
+    if not IsInInstance() then return nil end
+    local name, _, _, _, _, _, _, instanceID = GetInstanceInfo()
+    return instanceID, name
+end
+
+-- list : mélange de
+--   nombres           -> uiMapID d'une zone extérieure (/sg zone)
+--   { instance = N }  -> donjon / raid / champ de bataille (instanceID, /sg zone)
+--   chaînes           -> nom de zone ou de sous-zone tel qu'affiché par le client
 function SG.InZone(list)
     if not list then return false end
-    local id, mapName = SG.CurrentZone()
-    local zone, real = GetZoneText(), GetRealZoneText()
+    local instID = SG.CurrentInstance()
+    -- en instance, la carte "remonte" vers la zone extérieure : on l'ignore
+    local id, mapName
+    if not instID then id, mapName = SG.CurrentZone() end
+    local zone, real, sub = GetZoneText(), GetRealZoneText(), GetSubZoneText()
     for _, z in ipairs(list) do
-        if type(z) == "number" then
+        local t = type(z)
+        if t == "number" then
             if z == id then return true end
-        elseif z == zone or z == real or z == mapName then
+        elseif t == "table" then
+            if z.instance and z.instance == instID then return true end
+        elseif z == zone or z == real or z == mapName or (sub ~= "" and z == sub) then
             return true
         end
     end
@@ -107,6 +125,10 @@ local function CheckCondition(c)
     local negate = c:sub(1, 1) == "!"
     local name = negate and c:sub(2) or c
     local fn = SG.Conditions and SG.Conditions[name]
+    if not fn and SG.Zones and SG.Zones[name] then
+        -- chaque liste de SG.Zones est utilisable directement comme condition
+        fn = function() return SG.InZone(SG.Zones[name]) end
+    end
     if not fn then
         if not SG._warned then SG._warned = {} end
         if not SG._warned[name] then
@@ -408,9 +430,20 @@ SLASH_SWAPGEAR1, SLASH_SWAPGEAR2 = "/sg", "/swapgear"
 SlashCmdList.SWAPGEAR = function(msg)
     msg = (msg or ""):lower():match("^%s*(.-)%s*$")
     if msg == "zone" then
-        local id, name = SG.CurrentZone()
-        Print(("zone: %s (uiMapID %s) | sous-zone: %s"):format(
-            tostring(name), tostring(id), GetSubZoneText() or ""))
+        local instID, instName = SG.CurrentInstance()
+        if instID then
+            Print(("instance: %s -> |cffffd100{ instance = %s }|r"):format(tostring(instName), tostring(instID)))
+        else
+            local id, name = SG.CurrentZone()
+            Print(("zone: %s -> |cffffd100%s|r | sous-zone: %s"):format(
+                tostring(name), tostring(id), GetSubZoneText() or ""))
+        end
+        local cats = {}
+        for k, list in pairs(SG.Zones or {}) do
+            if SG.InZone(list) then cats[#cats + 1] = k end
+        end
+        table.sort(cats)
+        Print("types de zone actifs ici : " .. (#cats > 0 and table.concat(cats, ", ") or "aucun"))
     elseif msg == "speed" then
         Print(("vitesse: %.1f%%"):format(GetUnitSpeed("player") / 7 * 100))
     elseif msg == "status" or msg == "debug" then
@@ -460,13 +493,21 @@ SlashCmdList.SWAPGEAR = function(msg)
         print(C .. "/sg show|r - force l'affichage du bouton (pour le retrouver)")
         print(C .. "/sg reset|r - recentre le bouton et rescanne les sacs")
         print(C .. "/sg clear|r - oublie l'équipement normal mémorisé")
-        print(C .. "/sg zone|r - nom et uiMapID de la zone (pour SG.Zones)")
+        print(C .. "/sg zone|r - identifiant de la zone/instance + types de zone actifs ici")
         print(C .. "/sg speed|r - vitesse actuelle en %")
         print("Bouton : clic = équiper/remettre, Shift+glisser = déplacer. Macro : /click SwapGearButton")
         local names = {}
         for k in pairs(SG.Conditions or {}) do names[#names + 1] = k end
         table.sort(names)
         print("Conditions (Config.lua, préfixe ! pour inverser) : " .. C .. table.concat(names, ", ") .. "|r")
+        local zones = {}
+        for k in pairs(SG.Zones or {}) do
+            if not (SG.Conditions and SG.Conditions[k]) then zones[#zones + 1] = k end
+        end
+        table.sort(zones)
+        if #zones > 0 then
+            print("Types de zone (utilisables comme conditions) : " .. C .. table.concat(zones, ", ") .. "|r")
+        end
     else
         Print("commande inconnue '" .. msg .. "', tape /sg help")
     end
