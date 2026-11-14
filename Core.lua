@@ -163,11 +163,23 @@ local function SlotOrder(slots)
     return order
 end
 
--- Calcule ce qu'il faut faire. Renvoie :
---   equip   : liste { item=, slot=, rule= }  (objets situationnels à mettre)
---   restore : liste { link=, item=, slot= }  (remettre l'équipement normal)
+-- Calcule ce qu'il faut faire. Principe : pour chaque groupe de slots (ex :
+-- les 2 bijoux) on calcule une DISPOSITION CIBLE, puis on compare avec ce qui
+-- est porté.
+--   * "home" d'un slot = l'objet que tu y portais avant que l'addon y touche
+--   * un objet voulu qui est le "home" d'un slot y retourne toujours
+--   * les autres objets voulus prennent les slots dans l'ordre SG.ReplaceFirst
+--   * les slots restants reprennent leur "home"
+-- Le slot sacrifié en premier dépend donc de l'emplacement d'ORIGINE de tes
+-- objets, plus de l'endroit où un swap précédent a pu les laisser.
+-- Renvoie :
+--   equip   : liste { item=, slot=, rule=, from= }  (objets situationnels)
+--   restore : liste { item=, slot=, link=, from= }  (équipement normal)
+--   from = slot d'où vient l'objet s'il est déjà porté ailleurs (échange)
+local swapTime = 0
+
 function SG.ComputePlan()
-    local groups, wanted = {}, {}
+    local groups, ruleOf = {}, {}
 
     -- 1) objets voulus, par groupe de slots, dans l'ordre de priorité
     for _, rule in ipairs(SG.Rules or {}) do
@@ -178,68 +190,88 @@ function SG.ComputePlan()
             local g = groups[key]
             if not g then g = { slots = slots, items = {} }; groups[key] = g end
             local owned = bagItems[id] or EquippedSlot(id, slots)
-            if #g.items < #slots and owned and LevelOK(id) and SG.RuleActive(rule) then
-                g.items[#g.items + 1] = { id = id, rule = rule }
-                wanted[id] = true
+            if #g.items < #slots and owned and not ruleOf[id] and LevelOK(id) and SG.RuleActive(rule) then
+                g.items[#g.items + 1] = id
+                ruleOf[id] = rule
             end
         end
     end
 
     local saved, ours = SwapGearCharDB.saved, SwapGearCharDB.ours
+    local settling = GetTime() - swapTime < 2   -- un swap est peut-être en cours
+    local equip, restore = {}, {}
 
-    -- 2) affectation des slots
-    local equip = {}
     for _, g in pairs(groups) do
-        local locked, missing = {}, {}
-        for _, it in ipairs(g.items) do
-            local s = EquippedSlot(it.id, g.slots)
-            if s then locked[s] = true else missing[#missing + 1] = it end
-        end
-        local order = SlotOrder(g.slots)
-        for _, it in ipairs(missing) do
-            -- si cet objet est le stuff "normal" d'un slot qu'on a remplacé,
-            -- on le remet à SA place plutôt que n'importe où
-            local target
-            for _, s in ipairs(order) do
-                if not locked[s] and saved[s] and GetItemInfoInstant(saved[s]) == it.id then
-                    target = s; break
+        local cur, home, homeLink, ready = {}, {}, {}, true
+        for _, s in ipairs(g.slots) do
+            cur[s] = GetInventoryItemID("player", s)
+            if saved[s] then
+                local sid = GetItemInfoInstant(saved[s])
+                if cur[s] == nil then
+                    ready = false        -- inventaire pas encore chargé
+                elseif cur[s] == sid then
+                    saved[s], ours[s] = nil, nil                -- revenu à la normale
+                elseif not settling and ours[s] and cur[s] ~= ours[s] then
+                    saved[s], ours[s] = nil, nil                -- changé à la main
                 end
             end
-            if not target then
-                for _, s in ipairs(order) do
-                    if not locked[s] then target = s; break end
-                end
-            end
-            if target then
-                locked[target] = true
-                equip[#equip + 1] = { item = it.id, slot = target, rule = it.rule }
+            if saved[s] then
+                home[s], homeLink[s] = GetItemInfoInstant(saved[s]), saved[s]
+            else
+                home[s], homeLink[s] = cur[s], GetInventoryItemLink("player", s)
             end
         end
-    end
 
-    -- 3) restauration : un slot qu'on a remplacé, dont l'objet (posé par nous)
-    --    n'est plus voulu -> on propose de remettre l'ancien.
-    local restore = {}
-    for slot, link in pairs(saved) do
-        local savedID = GetItemInfoInstant(link)
-        local current = GetInventoryItemID("player", slot)
-        if current == nil then
-            -- inventaire pas encore chargé (écran de chargement, portail...)
-            -- ou slot vidé : on ne touche à rien
-        elseif current == savedID then
-            saved[slot], ours[slot] = nil, nil       -- déjà remis
-        elseif ours[slot] and current ~= ours[slot] and not wanted[current] then
-            saved[slot], ours[slot] = nil, nil       -- changé à la main : on oublie
-        elseif not wanted[current] and bagItems[savedID] then
-            restore[#restore + 1] = { link = link, item = savedID, slot = slot }
+        if ready then
+            local wanted, placed, target = {}, {}, {}
+            for _, id in ipairs(g.items) do wanted[id] = true end
+            -- a) un objet voulu retourne dans son slot d'origine
+            for _, s in ipairs(g.slots) do
+                local h = home[s]
+                if h and wanted[h] and not placed[h] then target[s] = h; placed[h] = true end
+            end
+            -- b) un objet voulu déjà porté reste où il est si le slot est libre
+            for _, id in ipairs(g.items) do
+                if not placed[id] then
+                    for _, s in ipairs(g.slots) do
+                        if cur[s] == id and not target[s] then target[s] = id; placed[id] = true; break end
+                    end
+                end
+            end
+            -- c) les autres prennent les slots dans l'ordre de sacrifice
+            local order = SlotOrder(g.slots)
+            for _, id in ipairs(g.items) do
+                if not placed[id] then
+                    for _, s in ipairs(order) do
+                        if not target[s] then target[s] = id; placed[id] = true; break end
+                    end
+                end
+            end
+            -- d) les slots restants reprennent leur objet d'origine
+            for _, s in ipairs(g.slots) do
+                if not target[s] then target[s] = home[s] end
+            end
+
+            -- actions
+            for _, s in ipairs(g.slots) do
+                local t = target[s]
+                if t and t ~= cur[s] then
+                    local from = EquippedSlot(t, g.slots)
+                    if from or bagItems[t] then
+                        local isHome = (t == home[s])
+                        local link
+                        if from then link = GetInventoryItemLink("player", from)
+                        elseif isHome then link = homeLink[s] end
+                        local a = { item = t, slot = s, from = from, link = link, rule = ruleOf[t] }
+                        if wanted[t] and not isHome then equip[#equip + 1] = a
+                        else
+                            a.link = a.link or homeLink[s]
+                            restore[#restore + 1] = a
+                        end
+                    end
+                end
+            end
         end
-    end
-    -- un slot déjà pris par un équipement prévu n'est pas à restaurer, et un
-    -- objet normal qu'on va de toute façon rééquiper non plus
-    local busy, equipping = {}, {}
-    for _, a in ipairs(equip) do busy[a.slot] = true; equipping[a.item] = true end
-    for i = #restore, 1, -1 do
-        if busy[restore[i].slot] or equipping[restore[i].item] then table.remove(restore, i) end
     end
     return equip, restore
 end
@@ -257,28 +289,51 @@ end
 -- ----------------------------------------------------------------------------
 local plan = { equip = {}, restore = {} }
 
-function SG.DoSwap()
+-- mémorise l'objet d'origine d'un slot avant d'y toucher pour la 1re fois
+local function Remember(slot, newItem)
+    local saved, ours = SwapGearCharDB.saved, SwapGearCharDB.ours
+    if not saved[slot] then saved[slot] = GetInventoryItemLink("player", slot) end
+    ours[slot] = newItem
+end
+
+function SG.DoSwap(depth)
+    depth = depth or 0
     if InCombatLockdown() then Print("impossible en combat.") return end
     ClearCursor()
-    local saved, ours = SwapGearCharDB.saved, SwapGearCharDB.ours
-    if #plan.equip > 0 then
-        for _, a in ipairs(plan.equip) do
-            local currentLink = GetInventoryItemLink("player", a.slot)
-            -- on mémorise l'objet "normal" une seule fois par slot, même si
-            -- c'est un objet d'une règle (ex : Vilebranch porté en permanence)
-            if currentLink and not saved[a.slot] then
-                saved[a.slot] = currentLink
-            end
-            if saved[a.slot] and GetItemInfoInstant(saved[a.slot]) == a.item then
-                saved[a.slot], ours[a.slot] = nil, nil   -- on remet l'objet normal
-            elseif saved[a.slot] then
-                ours[a.slot] = a.item                    -- objet posé par l'addon
-            end
-            EquipItemByName(a.item, a.slot)
+    local actions, done, swapped = {}, {}, false
+    for _, a in ipairs(plan.equip) do actions[#actions + 1] = a end
+    for _, a in ipairs(plan.restore) do actions[#actions + 1] = a end
+
+    -- 1) échanges entre deux slots déjà équipés (ex : bijou 14 -> 13)
+    for _, a in ipairs(actions) do
+        if a.from and not done[a.slot] and not done[a.from] then
+            local landing = GetInventoryItemID("player", a.slot)
+            Remember(a.slot, a.item)
+            Remember(a.from, landing)
+            PickupInventoryItem(a.from)
+            PickupInventoryItem(a.slot)
+            ClearCursor()
+            done[a.slot], done[a.from], swapped = true, true, true
         end
     end
-    for _, a in ipairs(plan.restore) do
-        EquipItemByName(a.link, a.slot)
+    -- 2) objets venant des sacs, sur les slots non touchés par un échange
+    for _, a in ipairs(actions) do
+        if not a.from and not done[a.slot] then
+            Remember(a.slot, a.item)
+            EquipItemByName(a.link or a.item, a.slot)
+            done[a.slot] = true
+        end
+    end
+    swapTime = GetTime()
+
+    -- un échange peut laisser une 2e étape (ex : 13<->14 puis remettre le 14) :
+    -- on enchaîne automatiquement une fois l'échange validé par le serveur
+    if swapped and depth < 3 then
+        C_Timer.After(0.6, function()
+            ScanBags()
+            local ok = pcall(SG.Refresh)
+            if ok and (#plan.equip + #plan.restore) > 0 then SG.DoSwap(depth + 1) end
+        end)
     end
 end
 

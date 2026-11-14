@@ -1,4 +1,4 @@
-# Publie automatiquement une Release GitHub (lue par WowUp) à chaque tag vX.Y.Z
+# Publie automatiquement une Release GitHub (lue par WowUp) a chaque tag vX.Y.Z
 name: Release
 
 on:
@@ -30,4 +30,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             "build/SwapGear-${GITHUB_REF_NAME#v}-forever.zip" \
-            --title "$GITHUB_REF_NAME" --generate-notes
+            --title "$GITHUB_REF_NAME" --notes-from-tag
