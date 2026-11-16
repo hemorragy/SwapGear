@@ -203,16 +203,26 @@ function SG.ComputePlan()
 
     for _, g in pairs(groups) do
         local cur, home, homeLink, ready = {}, {}, {}, true
+        -- un échange en attente du serveur ou un inventaire pas encore chargé :
+        -- on ne touche ni au plan ni à la mémoire de ce groupe
         for _, s in ipairs(g.slots) do
             cur[s] = GetInventoryItemID("player", s)
-            if saved[s] then
+            if (IsInventoryItemLocked and IsInventoryItemLocked(s))
+               or (saved[s] and cur[s] == nil) then
+                ready = false
+            end
+        end
+        for _, s in ipairs(g.slots) do
+            if ready and saved[s] then
                 local sid = GetItemInfoInstant(saved[s])
-                if cur[s] == nil then
-                    ready = false        -- inventaire pas encore chargé
-                elseif cur[s] == sid then
-                    saved[s], ours[s] = nil, nil                -- revenu à la normale
-                elseif not settling and ours[s] and cur[s] ~= ours[s] then
-                    saved[s], ours[s] = nil, nil                -- changé à la main
+                if cur[s] == sid then
+                    if not settling then saved[s], ours[s] = nil, nil end  -- revenu à la normale
+                elseif not settling and ours[s] and cur[s] ~= ours[s]
+                       and not SG.IsRuleItem(cur[s]) then
+                    -- changé à la main pour un objet hors règles : on oublie.
+                    -- (un objet des règles au mauvais endroit = swap raté ou
+                    -- interrompu, pas un choix du joueur : on garde la mémoire)
+                    saved[s], ours[s] = nil, nil
                 end
             end
             if saved[s] then
@@ -296,46 +306,70 @@ local function Remember(slot, newItem)
     ours[slot] = newItem
 end
 
-function SG.DoSwap(depth)
-    depth = depth or 0
+-- Vrai si un slot du plan est verrouillé (échange en attente du serveur)
+local function AnyLocked()
+    if CursorHasItem and CursorHasItem() then return true end
+    if not IsInventoryItemLocked then return false end
+    for s = 1, 19 do
+        if IsInventoryItemLocked(s) then return true end
+    end
+    return false
+end
+
+local autoUntil, autoSteps = 0, 0
+
+-- Exécute UNE étape du plan. Principe : on n'équipe que depuis les SACS
+-- (fiable). Un objet porté dans le mauvais slot est d'abord renvoyé dans les
+-- sacs (son slot reçoit sa cible), puis rééquipé au bon endroit à l'étape
+-- suivante. Les étapes s'enchaînent automatiquement, chacune après la
+-- confirmation du serveur (événements d'équipement), pas après un délai fixe.
+function SG.DoSwap(isAuto)
     if InCombatLockdown() then Print("impossible en combat.") return end
+    if AnyLocked() then return end                 -- étape précédente pas finie
     ClearCursor()
-    local actions, done, swapped = {}, {}, false
+    local actions, didSomething = {}, false
     for _, a in ipairs(plan.equip) do actions[#actions + 1] = a end
     for _, a in ipairs(plan.restore) do actions[#actions + 1] = a end
 
-    -- 1) échanges entre deux slots déjà équipés (ex : bijou 14 -> 13)
     for _, a in ipairs(actions) do
-        if a.from and not done[a.slot] and not done[a.from] then
-            local landing = GetInventoryItemID("player", a.slot)
-            Remember(a.slot, a.item)
-            Remember(a.from, landing)
-            PickupInventoryItem(a.from)
-            PickupInventoryItem(a.slot)
-            ClearCursor()
-            done[a.slot], done[a.from], swapped = true, true, true
-        end
-    end
-    -- 2) objets venant des sacs, sur les slots non touchés par un échange
-    for _, a in ipairs(actions) do
-        if not a.from and not done[a.slot] then
+        if not a.from then
             Remember(a.slot, a.item)
             EquipItemByName(a.link or a.item, a.slot)
-            done[a.slot] = true
+            didSomething = true
+        end
+    end
+    -- cas rare : uniquement des échanges entre slots portés (A en 13 voulu en
+    -- 14 et B en 14 voulu en 13) -> échange direct, un seul à la fois
+    if not didSomething then
+        for _, a in ipairs(actions) do
+            if a.from then
+                Remember(a.slot, a.item)
+                Remember(a.from, GetInventoryItemID("player", a.slot))
+                PickupInventoryItem(a.from)
+                PickupInventoryItem(a.slot)
+                didSomething = true
+                break
+            end
         end
     end
     swapTime = GetTime()
-
-    -- un échange peut laisser une 2e étape (ex : 13<->14 puis remettre le 14) :
-    -- on enchaîne automatiquement une fois l'échange validé par le serveur
-    if swapped and depth < 3 then
-        C_Timer.After(0.6, function()
-            ScanBags()
-            local ok = pcall(SG.Refresh)
-            if ok and (#plan.equip + #plan.restore) > 0 then SG.DoSwap(depth + 1) end
-        end)
+    if didSomething then
+        if not isAuto then autoSteps = 0 end
+        autoSteps = autoSteps + 1
+        autoUntil = GetTime() + 5
     end
 end
+
+-- appelé à chaque rafraîchissement : enchaîne l'étape suivante si besoin
+local function ContinueSwap()
+    if autoSteps == 0 or GetTime() > autoUntil or autoSteps >= 6 then
+        autoSteps = 0; return
+    end
+    if AnyLocked() then return end                 -- on attend le serveur
+    if (#plan.equip + #plan.restore) == 0 then autoSteps = 0; return end
+    SG.DoSwap(true)
+end
+SG._ContinueSwap = ContinueSwap
 
 -- ----------------------------------------------------------------------------
 --  Bouton
@@ -413,6 +447,7 @@ function SG.Refresh()
         btn:Hide(); return
     end
     plan.equip, plan.restore = SG.ComputePlan()
+    SG._ContinueSwap()
 
     local isEquip = #plan.equip > 0
     local first = plan.equip[1] or plan.restore[1]
@@ -471,7 +506,8 @@ ev:SetScript("OnEvent", function(self, event, ...)
         }) do pcall(self.RegisterEvent, self, e) end
         -- filet de sécurité pour les conditions perso sans événement dédié
         C_Timer.NewTicker(1, QueueRefresh)
-    elseif event == "BAG_UPDATE_DELAYED" or event == "PLAYER_ENTERING_WORLD" then
+    elseif event == "BAG_UPDATE_DELAYED" or event == "PLAYER_ENTERING_WORLD"
+        or event == "PLAYER_EQUIPMENT_CHANGED" then
         -- après un écran de chargement, sacs et équipement arrivent un peu après
         ScanBags()
     end
@@ -527,6 +563,11 @@ SlashCmdList.SWAPGEAR = function(msg)
         else
             Print("|cffff4444ERREUR plan|r " .. tostring(e))
         end
+        local mem = {}
+        for s, link in pairs(SwapGearCharDB.saved or {}) do
+            mem[#mem + 1] = (SLOT_NAMES[s] or s) .. " = " .. link
+        end
+        Print("mémorisé (objet d'origine par slot) : " .. (#mem > 0 and table.concat(mem, ", ") or "rien"))
         if SG.lastError then Print("dernière erreur: " .. SG.lastError) end
     elseif msg == "show" then
         btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")

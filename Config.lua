@@ -21,6 +21,9 @@ SG.Rules = {
     -- +3%
     { item = 11122,  name = "Carrot on a Stick", when = { "mounted" } },
 
+    -- argent dawn
+    { item = 12846, name = "Argent Dawn Commission", when = { "argent" } },
+
     -- damage forest
     -- ap
     { item = 270275, name = "Cleansed Vilebranch Medallion", when = { "forest" } },
@@ -98,6 +101,7 @@ SG.Zones = {
         1452,  -- Berceau-de-l'Hiver / Winterspring
         1457,  -- Darnassus
         1453,  -- Hurlevent / Stormwind
+        2482,  -- Mount Hyjal
         2548,  -- Riverdale
         I(30),   -- Vallee d'Alterac
         I(529),  -- Bassin Arathi
@@ -105,10 +109,8 @@ SG.Zones = {
         I(429),  -- Hache-Tripes / Dire Maul
         I(33),   -- Donjon d'Ombrecroc / Shadowfang Keep
         I(309),  -- Zul'Gurub
-        "Baie-du-Butin", "Booty Bay",
-        "Thalanaar",
         -- zones propres a Forever (nom FR a verifier avec /sg zone) :
-        "Darkspear Islands", "Mount Hyjal", "Shen'dralas",
+        "Darkspear Islands", "Shen'dralas",
         "Zephras Isle", "Blackmaw Hold", "Excavation Site: Wetlands", "Gilneas",
         "Krol'dok Stronghold", "Ruins of Gilneas", "The Shaper's Terrace", "Valanaar",
     },
@@ -123,7 +125,8 @@ SG.Zones = {
         I(349),  -- Maraudon
         I(109),  -- Temple d'Atal'Hakkar
         I(43),   -- Cavernes des Lamentations / Wailing Caverns
-        "Excavation Site: Wetlands", "The Drowned City", "The Shaper's Terrace",
+        I(2970), -- The Drowned City
+        "Excavation Site: Wetlands", "The Shaper's Terrace",
     },
     wasteland = {
         1418,  -- Terres ingrates / Badlands
@@ -172,8 +175,9 @@ SG.Zones = {
         I(109),  -- Temple d'Atal'Hakkar
         I(209),  -- Zul'Farrak
         I(309),  -- Zul'Gurub
+        I(2970), -- The Drowned City
         "Ruines de Lordaeron", "Ruins of Lordaeron",
-        "Shen'dralas", "Gilneas", "Ruins of Gilneas", "The Drowned City", "The Hall of Thanes",
+        "Shen'dralas", "Gilneas", "Ruins of Gilneas", "The Hall of Thanes",
     },
     mountain = {
         1416,  -- Montagnes d'Alterac
@@ -195,10 +199,11 @@ SG.Zones = {
         1441,  -- Mille pointes / Thousand Needles
         1452,  -- Berceau-de-l'Hiver / Winterspring
         1456,  -- Les Pitons-du-Tonnerre / Thunder Bluff
+        2482,  -- Mount Hyjal
         I(30),   -- Vallee d'Alterac
         I(529),  -- Bassin Arathi
         "Mont Rochenoire", "Blackrock Mountain",
-        "Mount Hyjal", "Zephras Isle", "Blackmaw Hold", "Krol'dok Stronghold",
+        "Zephras Isle", "Blackmaw Hold", "Krol'dok Stronghold",
     },
     snowy = {
         1416,  -- Montagnes d'Alterac
@@ -234,6 +239,7 @@ SG.Zones = {
         I(489),  -- Goulet des Chanteguerres
         I(209),  -- Zul'Farrak
         I(309),  -- Zul'Gurub
+        I(2970), -- The Drowned City
         "Baie-du-Butin", "Booty Bay",
         "Gadgetzan",
         "Long-guet", "Everlook",
@@ -241,7 +247,7 @@ SG.Zones = {
         "Portes d'Ahn'Qiraj", "Gates of Ahn'Qiraj",
         "Ruines de Lordaeron", "Ruins of Lordaeron",
         "Alcaz Prison", "Blackmaw Hold", "City of Dalaran", "Gilneas", "Krol'dok Stronghold",
-        "Ruins of Gilneas", "The Drowned City", "The Hall of Thanes", "Valanaar",
+        "Ruins of Gilneas", "The Hall of Thanes", "Valanaar",
     },
     underground = {
         1455,  -- Forgefer / Ironforge
@@ -266,6 +272,12 @@ SG.Zones = {
         1428,   -- Steppes ardentes / Burning Steppes
         1427,   -- Gorge des Vents brulants / Searing Gorge
         I(409), -- Coeur du Magma / Molten Core
+    },
+    argent = {
+        1423,  -- Maleterres de l'Est
+        1422,  -- Maleterres de l'Ouest
+        I(289),  -- Scholomance
+        I(329),  -- Stratholme
     },
 }
 
