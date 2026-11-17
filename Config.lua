@@ -15,11 +15,13 @@ local _, SG = ...
 --  Le slot (bijou, gants, bottes...) est deduit automatiquement de l'objet.
 -- ----------------------------------------------------------------------------
 SG.Rules = {
-    -- Mount speed
-    -- +7% desert
+    -- Speed
+    -- +7% mount desert
     { item = 274648, name = "The Desert Rose",   when = { "mounted", "desert" } },
-    -- +3%
+    -- +3% mount
     { item = 11122,  name = "Carrot on a Stick", when = { "mounted" } },
+    -- +5% swim
+    { item = 260308,  name = "Hyjal Postal Clasp", when = { "swimming" } },
 
     -- argent dawn
     { item = 12846, name = "Argent Dawn Commission", when = { "argent" } },
