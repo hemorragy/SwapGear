@@ -178,7 +178,7 @@ end
 --   from = slot d'où vient l'objet s'il est déjà porté ailleurs (échange)
 local swapTime = 0
 
-function SG.ComputePlan()
+function SG.ComputePlan(ignoreRules)
     local groups, ruleOf = {}, {}
 
     -- 1) objets voulus, par groupe de slots, dans l'ordre de priorité
@@ -190,7 +190,7 @@ function SG.ComputePlan()
             local g = groups[key]
             if not g then g = { slots = slots, items = {} }; groups[key] = g end
             local owned = bagItems[id] or EquippedSlot(id, slots)
-            if #g.items < #slots and owned and not ruleOf[id] and LevelOK(id) and SG.RuleActive(rule) then
+            if not ignoreRules and #g.items < #slots and owned and not ruleOf[id] and LevelOK(id) and SG.RuleActive(rule) then
                 g.items[#g.items + 1] = id
                 ruleOf[id] = rule
             end
@@ -370,6 +370,7 @@ local function ContinueSwap()
     SG.DoSwap(true)
 end
 SG._ContinueSwap = ContinueSwap
+function SG._StopAuto() autoSteps = 0 end
 
 -- ----------------------------------------------------------------------------
 --  Bouton
@@ -403,7 +404,16 @@ btn.label:SetPoint("TOP", btn, "BOTTOM", 0, -2)
 
 btn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 
-btn:SetScript("OnClick", function() SG.DoSwap() end)
+-- Clic : plan normal, ou (bouton estompé) retour forcé à l'équipement de base
+local forceUntil = 0
+function SG.Click()
+    if plan.faded then
+        plan.equip, plan.restore = {}, plan.alt or {}
+        forceUntil = GetTime() + 5      -- on ignore les règles le temps du retour
+    end
+    SG.DoSwap()
+end
+btn:SetScript("OnClick", function() SG.Click() end)
 btn:SetScript("OnDragStart", function(self)
     if IsShiftKeyDown() then self:StartMoving() end
 end)
@@ -414,6 +424,13 @@ btn:SetScript("OnDragStop", function(self)
 end)
 btn:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    if plan.faded then
+        GameTooltip:AddLine("SwapGear : remettre l'équipement de base")
+        for _, a in ipairs(plan.alt or {}) do
+            GameTooltip:AddDoubleLine(a.link, SLOT_NAMES[a.slot], 1, 1, 1, 1, 1, 1)
+        end
+        GameTooltip:AddLine("Les conditions sont toujours actives : utile avant un pull.", 0.6, 0.6, 0.6, true)
+    end
     if #plan.equip > 0 then
         GameTooltip:AddLine("SwapGear : équiper")
         for _, a in ipairs(plan.equip) do
@@ -446,18 +463,38 @@ function SG.Refresh()
     if InCombatLockdown() or UnitIsDeadOrGhost("player") then
         btn:Hide(); return
     end
-    plan.equip, plan.restore = SG.ComputePlan()
-    SG._ContinueSwap()
+    local forcing = GetTime() < forceUntil
+    plan.equip, plan.restore = SG.ComputePlan(forcing)
+    if forcing and (#plan.equip + #plan.restore) == 0 then
+        -- retour forcé terminé : on reprend les règles, sans rien enchaîner
+        forceUntil = 0
+        SG._StopAuto()
+        plan.equip, plan.restore = SG.ComputePlan()
+    else
+        SG._ContinueSwap()
+    end
+
+    -- rien à faire selon les règles, mais des pièces situationnelles sont
+    -- portées : bouton estompé pour revenir à l'équipement de base
+    plan.faded, plan.alt = false, nil
+    if #plan.equip + #plan.restore == 0 and not forcing then
+        local _, alt = SG.ComputePlan(true)
+        if #alt > 0 then plan.faded, plan.alt = true, alt end
+    end
 
     local isEquip = #plan.equip > 0
-    local first = plan.equip[1] or plan.restore[1]
-    local total = #plan.equip + #plan.restore
+    local first = plan.equip[1] or plan.restore[1] or (plan.alt and plan.alt[1])
+    local total = #plan.equip + #plan.restore + (plan.faded and #plan.alt or 0)
     if total == 0 then btn:Hide(); return end
 
     btn.icon:SetTexture(GetItemIcon(first.item))
+    btn.icon:SetDesaturated(plan.faded)
+    btn:SetAlpha(plan.faded and (SG.FadedAlpha or 0.45) or 1)
     btn.count:SetText(total > 1 and total or "")
-    btn.label:SetText(isEquip and "Équiper" or "Remettre")
-    if isEquip then btn.border:SetVertexColor(0.2, 1, 0.2) else btn.border:SetVertexColor(1, 0.8, 0.2) end
+    btn.label:SetText(plan.faded and "Base" or (isEquip and "Équiper" or "Remettre"))
+    if plan.faded then btn.border:SetVertexColor(0.5, 0.5, 0.5)
+    elseif isEquip then btn.border:SetVertexColor(0.2, 1, 0.2)
+    else btn.border:SetVertexColor(1, 0.8, 0.2) end
     btn:Show()
     if GameTooltip:IsOwned(btn) then btn:GetScript("OnEnter")(btn) end
 end
@@ -575,7 +612,7 @@ SlashCmdList.SWAPGEAR = function(msg)
         btn:Show()
         Print("bouton forcé visible (Shift+glisser pour le bouger, /sg reset pour recentrer)")
     elseif msg == "swap" then
-        SG.DoSwap()
+        SG.Click()
     elseif msg == "reset" then
         SwapGearDB.pos = nil; PlaceButton(); ScanBags(); QueueRefresh(); Print("position réinitialisée.")
     elseif msg == "clear" then
