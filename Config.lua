@@ -24,6 +24,11 @@ SG.Rules = {
     { item = 260308,  name = "Hyjal Postal Clasp", when = { "swimming" } },
 
     -- argent dawn
+    -- ap
+    { item = 13209, name = "Seal of the Dawn", when = { "argent" } },
+    -- sp
+    { item = 19812, name = "Rune of the Dawn", when = { "argent" } },
+    -- base
     { item = 12846, name = "Argent Dawn Commission", when = { "argent" } },
 
     -- damage forest
