@@ -31,14 +31,14 @@ SG.Rules = {
     -- base
     { item = 12846, name = "Argent Dawn Commission", when = { "argent" } },
 
-    -- damage forest
-    -- ap
+    -- haunted/waste mana caster
+    { item = 20512, name = "Sanctified Orb", when = { "hauntedOrWasteland" } },
+    -- forest ap
     { item = 270275, name = "Cleansed Vilebranch Medallion", when = { "forest" } },
-    -- sp
+    -- forest sp
     { item = 270276, name = "Cleansed Vilebranch Icon",      when = { "forest" } },
 
     -- Exemples (decommente / adapte) :
-    -- { item = 7969, name = "Bottes avec eperons", when = { "mounted" } },
     -- { item = 12345, name = "Gants Joug-d'hiver", when = { "mounted", function()
     --       return SG.InZone({ "Joug-d'hiver", "Wintergrasp" })
     --   end } },
@@ -116,10 +116,12 @@ SG.Zones = {
         I(429),  -- Hache-Tripes / Dire Maul
         I(33),   -- Donjon d'Ombrecroc / Shadowfang Keep
         I(309),  -- Zul'Gurub
+        I(2974),  -- Blackmaw Hold
+        I(3001),  -- The Shaper's Terrace
         -- zones propres a Forever (nom FR a verifier avec /sg zone) :
         "Darkspear Islands", "Shen'dralas",
-        "Zephras Isle", "Blackmaw Hold", "Excavation Site: Wetlands", "Gilneas",
-        "Krol'dok Stronghold", "Ruins of Gilneas", "The Shaper's Terrace", "Valanaar",
+        "Zephras Isle", "Excavation Site: Wetlands", "Gilneas",
+        "Krol'dok Stronghold", "Ruins of Gilneas", "Valanaar",
     },
     swamp = {
         1439,  -- Sombrivage / Darkshore
@@ -133,7 +135,8 @@ SG.Zones = {
         I(109),  -- Temple d'Atal'Hakkar
         I(43),   -- Cavernes des Lamentations / Wailing Caverns
         I(2970), -- The Drowned City
-        "Excavation Site: Wetlands", "The Shaper's Terrace",
+        I(3001),  -- The Shaper's Terrace
+        "Excavation Site: Wetlands",
     },
     wasteland = {
         1418,  -- Terres ingrates / Badlands
@@ -209,8 +212,9 @@ SG.Zones = {
         2482,  -- Mount Hyjal
         I(30),   -- Vallee d'Alterac
         I(529),  -- Bassin Arathi
+        I(2974),  -- Blackmaw Hold
         "Mont Rochenoire", "Blackrock Mountain",
-        "Zephras Isle", "Blackmaw Hold", "Krol'dok Stronghold",
+        "Zephras Isle", "Krol'dok Stronghold",
     },
     snowy = {
         1416,  -- Montagnes d'Alterac
@@ -247,13 +251,14 @@ SG.Zones = {
         I(209),  -- Zul'Farrak
         I(309),  -- Zul'Gurub
         I(2970), -- The Drowned City
+        I(2974),  -- Blackmaw Hold
         "Baie-du-Butin", "Booty Bay",
         "Gadgetzan",
         "Long-guet", "Everlook",
         "Mont Rochenoire", "Blackrock Mountain",
         "Portes d'Ahn'Qiraj", "Gates of Ahn'Qiraj",
         "Ruines de Lordaeron", "Ruins of Lordaeron",
-        "Alcaz Prison", "Blackmaw Hold", "City of Dalaran", "Gilneas", "Krol'dok Stronghold",
+        "Alcaz Prison", "City of Dalaran", "Gilneas", "Krol'dok Stronghold",
         "Ruins of Gilneas", "The Hall of Thanes", "Valanaar",
     },
     underground = {
@@ -271,7 +276,8 @@ SG.Zones = {
         I(34),   -- La Prison
         I(70),   -- Uldaman
         I(43),   -- Cavernes des Lamentations
-        "Alcaz Prison", "Blackmaw Hold", "The Hall of Thanes",
+        I(2974),  -- Blackmaw Hold
+        "Alcaz Prison", "The Hall of Thanes",
     },
     -- Pas encore de liste officielle selon la source. Candidats probables,
     -- a verifier avec l'infobulle de l'objet sur place :
@@ -298,4 +304,7 @@ SG.Conditions = {
     indoors  = function() return IsIndoors() end,
     resting  = function() return IsResting() end,          -- en ville / auberge
     instance = function() return (IsInInstance()) end,     -- donjon / raid / BG
+    hauntedOrWasteland = function()
+        return SG.InZone(SG.Zones.haunted) or SG.InZone(SG.Zones.wasteland)
+    end,
 }

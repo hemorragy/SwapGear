@@ -240,14 +240,9 @@ function SG.ComputePlan(ignoreRules)
                 local h = home[s]
                 if h and wanted[h] and not placed[h] then target[s] = h; placed[h] = true end
             end
-            -- b) un objet voulu déjà porté reste où il est si le slot est libre
-            for _, id in ipairs(g.items) do
-                if not placed[id] then
-                    for _, s in ipairs(g.slots) do
-                        if cur[s] == id and not target[s] then target[s] = id; placed[id] = true; break end
-                    end
-                end
-            end
+            -- b) (pas de "reste où il est" : un objet situationnel déjà porté
+            --    est replacé selon l'ordre de sacrifice, pour rendre leur slot
+            --    aux objets d'origine, ex : Seal 13 -> 14 en quittant la forêt)
             -- c) les autres prennent les slots dans l'ordre de sacrifice
             local order = SlotOrder(g.slots)
             for _, id in ipairs(g.items) do
